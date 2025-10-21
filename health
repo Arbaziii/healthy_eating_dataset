@@ -27,7 +27,7 @@ N_JOBS = -1
 df = pd.read_csv(CSV)
 print(f"Loaded dataset with {df.shape[0]} rows and {df.shape[1]} columns")
 
-drop_like = [c for c in df.columns if any(k in c.lower() for k in ["url", "image", "img", "photo", "link", "thumbnail"])]
+drop_like = [c for c in df.columns if any(k in c.lower() for k in ["image_url"])]
 if drop_like:
     df = df.drop(columns=drop_like)
     print("Dropped URL/image-related columns:", drop_like)
