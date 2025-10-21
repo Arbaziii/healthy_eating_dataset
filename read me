@@ -1,0 +1,93 @@
+# 🍽️ Healthy Eating Data Analysis
+
+This project explores **how nutritional attributes and meal types influence the healthiness and ratings of meals** using **machine learning and data analytics**.  
+It is based on the dataset `healthy_eating_dataset.csv` and demonstrates both **regression** and **classification** modeling.
+
+---
+
+## 🎯 Research Question
+
+> **How do meal type, cuisine, and nutritional composition (calories, protein, carbs, fat, etc.) influence meal ratings and healthiness, and can we predict them using data analytics?**
+
+---
+
+## 📊 Objectives
+
+1. Analyze how different nutritional and categorical factors affect meal ratings.  
+2. Predict whether a meal is healthy or unhealthy using classification models.  
+3. Identify which factors (e.g., calories, macros, cuisine type) most influence ratings and healthiness.  
+4. Visualize key trends, correlations, and model insights.
+
+---
+
+## 🧠 Methodology
+
+### 1. **Data Preprocessing**
+- Loaded and cleaned `healthy_eating_dataset.csv`
+- Removed any URL/image-related columns
+- Converted categorical variables (e.g., `meal_type`, `cuisine`)
+- Engineered new features:
+  - `cal_per_g` – energy density  
+  - `protein_ratio`, `carb_ratio`, `fat_ratio` – macro composition ratios
+
+### 2. **Exploratory Analysis**
+- Correlation heatmap of numeric nutritional features  
+- Visualization of relationships between nutritional metrics and target variables  
+
+### 3. **Modeling**
+#### 🔹 Regression Models (Predicting `rating`)
+- Linear Regression  
+- Random Forest Regressor  
+- Gradient Boosting Regressor  
+
+#### 🔹 Classification Models (Predicting `is_healthy`)
+- Logistic Regression  
+- Random Forest Classifier  
+- Gradient Boosting Classifier  
+
+### 4. **Evaluation Metrics**
+- **Regression:** R², MAE, RMSE  
+- **Classification:** Accuracy, F1 Score, AUC  
+
+### 5. **Visualizations**
+- Correlation Heatmap  
+- Actual vs Predicted Rating Plot  
+- Top Feature Importances  
+- Confusion Matrix for Classification Models  
+
+---
+
+## 📈 Findings
+
+- **Nutritional balance** (especially higher protein and lower fat ratios) strongly correlates with both higher meal ratings and increased healthiness.  
+- **Cooking method** and **meal type** also impact perceived quality and health level.  
+- The **Random Forest** and **Gradient Boosting** models performed best for both regression and classification tasks.  
+- Machine learning can reliably predict healthiness and ratings based on nutritional attributes.
+
+---
+
+## 💡 Key Insights
+
+| Aspect | Observation |
+|--------|--------------|
+| Highest Influence | Protein-to-fat ratio and calories per gram |
+| Best Regression Model | Gradient Boosting Regressor (highest R², lowest RMSE) |
+| Best Classification Model | Random Forest Classifier (highest F1 and Accuracy) |
+| Visualization Highlights | Positive correlation between protein and rating; negative with sugar/fat |
+
+---
+
+## 🧩 Technologies Used
+
+- Python  
+- Pandas, NumPy  
+- Matplotlib  
+- scikit-learn  
+- Google Colab  
+
+---
+
+## 🚀 How to Run
+
+1. Open **[Google Colab](https://colab.research.google.com/)**  
+2. Upload the following file when prompted:
