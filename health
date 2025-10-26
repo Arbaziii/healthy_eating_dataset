@@ -1,48 +1,64 @@
-import warnings
-warnings.filterwarnings("ignore")
+from google.colab import files
+uploaded = files.upload()
+CSV_PATH = list(uploaded.keys())[0]
 
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-
+import warnings; warnings.filterwarnings("ignore")
+import numpy as np, pandas as pd, matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import (
-    r2_score, mean_absolute_error, mean_squared_error,
-    accuracy_score, f1_score, roc_auc_score, confusion_matrix
-)
-from sklearn.linear_model import LinearRegression, LogisticRegression
-from sklearn.ensemble import (
-    RandomForestRegressor, GradientBoostingRegressor,
-    RandomForestClassifier, GradientBoostingClassifier
-)
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, confusion_matrix
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
 N_JOBS = -1
 
-# Step 3: Load and Clean Data
-df = pd.read_csv(CSV)
-print(f"Loaded dataset with {df.shape[0]} rows and {df.shape[1]} columns")
+df = pd.read_csv(CSV_PATH)
 
-drop_like = [c for c in df.columns if any(k in c.lower() for k in ["image_url"])]
-if drop_like:
-    df = df.drop(columns=drop_like)
-    print("Dropped URL/image-related columns:", drop_like)
+drop_like = [c for c in df.columns if any(k in c.lower() for k in ["url","image","img","photo","link","thumbnail"])]
+if drop_like: df = df.drop(columns=drop_like)
 
-numeric_cols = ["calories","protein_g","carbs_g","fat_g","fiber_g","sugar_g",
-                "sodium_mg","cholesterol_mg","serving_size_g","prep_time_min","cook_time_min","rating"]
-for c in numeric_cols:
-    if c in df.columns:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
+num_cols_all = ["calories","protein_g","carbs_g","fat_g","fiber_g","sugar_g",
+                "sodium_mg","cholesterol_mg","serving_size_g",
+                "prep_time_min","cook_time_min","rating"]
+for c in num_cols_all:
+    if c in df.columns: df[c] = pd.to_numeric(df[c], errors="coerce")
 
 if "is_healthy" in df.columns:
     if df["is_healthy"].dtype == object:
-        df["is_healthy"] = df["is_healthy"].astype(str).str.strip().str.lower().map(
-            {"yes":1,"true":1,"1":1,"no":0,"false":0,"0":0}
-        )
+        df["is_healthy"] = (df["is_healthy"].astype(str).str.strip().str.lower()
+                            .map({"yes":1,"true":1,"1":1,"no":0,"false":0,"0":0}))
     df["is_healthy"] = pd.to_numeric(df["is_healthy"], errors="coerce").astype("Int64")
+def add_features(d):
+    d = d.copy()
+    if {"calories","serving_size_g"} <= set(d.columns):
+        d["cal_per_g"] = d["calories"] / d["serving_size_g"].replace(0, np.nan)
+    if {"protein_g","carbs_g","fat_g"} <= set(d.columns):
+        tot = (d["protein_g"].fillna(0)+d["carbs_g"].fillna(0)+d["fat_g"].fillna(0)).replace(0,np.nan)
+        d["protein_ratio"] = d["protein_g"] / tot
+        d["carb_ratio"]    = d["carbs_g"] / tot
+        d["fat_ratio"]     = d["fat_g"] / tot
+        d["carb_to_protein"] = d["carbs_g"].replace(0,np.nan) / d["protein_g"].replace(0,np.nan)
+        d["fat_to_protein"]  = d["fat_g"].replace(0,np.nan)   / d["protein_g"].replace(0,np.nan)
+    if "calories" in d.columns:
+        for col in ["protein_g","carbs_g","fat_g","fiber_g","sugar_g","sodium_mg"]:
+            if col in d.columns:
+                d[f"{col}_per_cal"] = d[col] / d["calories"].replace(0,np.nan)
+    if {"prep_time_min","cook_time_min"} <= set(d.columns):
+        d["total_time_min"] = d["prep_time_min"].fillna(0) + d["cook_time_min"].fillna(0)
+        if "serving_size_g" in d.columns:
+            d["time_per_100g"] = d["total_time_min"] / d["serving_size_g"].replace(0,np.nan) * 100
+    return d
+df = add_features(df)
+df.replace([np.inf, -np.inf], np.nan, inplace=True)
+cat_cols = [c for c in ["cuisine","meal_type","diet_type","cooking_method"] if c in df.columns]
+num_cols = [c for c in df.columns if c not in cat_cols and df[c].dtype != "O" and c != "is_healthy"]
+feature_cols = cat_cols + num_cols
+
 
 
