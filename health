@@ -1,3 +1,4 @@
+
 from google.colab import files
 uploaded = files.upload()
 CSV_PATH = list(uploaded.keys())[0]
@@ -18,6 +19,7 @@ RANDOM_STATE = 42
 TEST_SIZE = 0.2
 N_JOBS = -1
 
+
 df = pd.read_csv(CSV_PATH)
 
 drop_like = [c for c in df.columns if any(k in c.lower() for k in ["url","image","img","photo","link","thumbnail"])]
@@ -34,6 +36,7 @@ if "is_healthy" in df.columns:
         df["is_healthy"] = (df["is_healthy"].astype(str).str.strip().str.lower()
                             .map({"yes":1,"true":1,"1":1,"no":0,"false":0,"0":0}))
     df["is_healthy"] = pd.to_numeric(df["is_healthy"], errors="coerce").astype("Int64")
+
 def add_features(d):
     d = d.copy()
     if {"calories","serving_size_g"} <= set(d.columns):
@@ -54,11 +57,207 @@ def add_features(d):
         if "serving_size_g" in d.columns:
             d["time_per_100g"] = d["total_time_min"] / d["serving_size_g"].replace(0,np.nan) * 100
     return d
+
 df = add_features(df)
 df.replace([np.inf, -np.inf], np.nan, inplace=True)
+
 cat_cols = [c for c in ["cuisine","meal_type","diet_type","cooking_method"] if c in df.columns]
 num_cols = [c for c in df.columns if c not in cat_cols and df[c].dtype != "O" and c != "is_healthy"]
 feature_cols = cat_cols + num_cols
 
+
+if len(num_cols) > 1:
+    corr = df[num_cols].corr()
+    plt.figure(figsize=(10,6))
+    plt.imshow(corr, cmap="coolwarm", interpolation="none")
+    plt.colorbar()
+    plt.title("Feature Correlation Heatmap")
+    plt.xticks(range(len(num_cols)), num_cols, rotation=90)
+    plt.yticks(range(len(num_cols)), num_cols)
+    plt.tight_layout()
+    plt.show()
+try:
+    ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
+except TypeError:
+    ohe = OneHotEncoder(handle_unknown="ignore", sparse=False)
+
+cat_pipe = Pipeline([
+    ("imputer", SimpleImputer(strategy="most_frequent")),
+    ("ohe", ohe)
+])
+
+num_pipe = Pipeline([
+    ("imputer", SimpleImputer(strategy="median"))
+])
+
+preprocessor = ColumnTransformer(
+    [("cat", cat_pipe, cat_cols),
+     ("num", num_pipe, [c for c in feature_cols if c not in cat_cols])],
+    remainder="drop"
+)
+
+models = {
+    "LogisticRegression": LogisticRegression(max_iter=600),
+    "RandomForestClassifier": RandomForestClassifier(n_estimators=500, random_state=RANDOM_STATE, n_jobs=N_JOBS),
+    "GradientBoostingClassifier": GradientBoostingClassifier(random_state=RANDOM_STATE)
+}
+
+def evaluate_classification(X, y, label_name="target", labels_order=None, show_bars=True):
+    Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y)
+    rows, fitted = [], {}
+    for name, mdl in models.items():
+        pipe = Pipeline([("prep", preprocessor), ("model", mdl)])
+        pipe.fit(Xtr, ytr)
+        pred = pipe.predict(Xte)
+        acc = accuracy_score(yte, pred)
+        f1  = f1_score(yte, pred, average="weighted")
+        try:
+            proba = pipe.predict_proba(Xte)
+            if y.nunique() == 2:
+                auc = roc_auc_score(yte, proba[:,1])
+            else:
+                auc = roc_auc_score(pd.get_dummies(yte), proba, multi_class="ovr")
+        except Exception:
+            auc = np.nan
+        rows.append({"Model": name, "Accuracy": acc, "F1": f1, "AUC": auc})
+        fitted[name] = (pipe, (Xte, yte, pred))
+
+    res = pd.DataFrame(rows).sort_values(["F1","Accuracy"], ascending=False)
+    print(f"\n--- Classification Results ({label_name}) ---")
+    print(res)
+
+    if show_bars:
+        plt.figure(figsize=(8,4))
+        plt.bar(res["Model"], res["Accuracy"])
+        plt.title(f"{label_name}: Accuracy by Model")
+        plt.ylabel("Accuracy"); plt.tight_layout(); plt.show()
+
+        plt.figure(figsize=(8,4))
+        plt.bar(res["Model"], res["F1"])
+        plt.title(f"{label_name}: F1-Score by Model")
+        plt.ylabel("F1"); plt.tight_layout(); plt.show()
+
+    best = res.iloc[0]["Model"]
+    pipe, (Xte, yte, pred) = fitted[best]
+    labels = labels_order if labels_order else sorted(y.unique())
+    cm = confusion_matrix(yte, pred, labels=labels)
+    plt.figure(figsize=(6,5))
+    plt.imshow(cm, cmap="Blues")
+    plt.title(f"Confusion Matrix ({label_name}: {best})")
+    plt.xlabel("Predicted"); plt.ylabel("Actual")
+    for (i,j),v in np.ndenumerate(cm):
+        plt.text(j, i, int(v), ha="center", va="center")
+    plt.xticks(range(len(labels)), labels); plt.yticks(range(len(labels)), labels)
+    plt.tight_layout(); plt.show()
+    return res, fitted
+rating_results = None; rating_fitted = None
+if "rating" in df.columns:
+    d = df.dropna(subset=["rating"]).copy()
+    if d["rating"].nunique() >= 3:
+        try:
+            d["rating_class"] = pd.qcut(d["rating"], q=3, labels=["Low","Medium","High"], duplicates="drop")
+            if d["rating_class"].nunique() < 3: raise ValueError
+        except Exception:
+            d["rating_class"] = pd.cut(d["rating"], bins=[-np.inf, 2.5, 3.5, np.inf], labels=["Low","Medium","High"])
+    else:
+        d["rating_class"] = pd.cut(d["rating"], bins=[-np.inf, 2.5, 3.5, np.inf], labels=["Low","Medium","High"])
+
+    X_rating = d[feature_cols]
+    y_rating = d["rating_class"].astype("category")
+    print("Rating → class distribution:\n", y_rating.value_counts())
+    rating_results, rating_fitted = evaluate_classification(X_rating, y_rating, label_name="rating_class", labels_order=["Low","Medium","High"])
+health_results = None; health_fitted = None
+if "is_healthy" in df.columns:
+    d = df.dropna(subset=["is_healthy"]).copy()
+    if d["is_healthy"].nunique() >= 2:
+        X_health = d[feature_cols]
+        y_health = d["is_healthy"].astype(int)
+        print("is_healthy → class distribution:\n", y_health.value_counts())
+        health_results, health_fitted = evaluate_classification(X_health, y_health, label_name="is_healthy", labels_order=[0,1])
+
+print("\nModels used: LogisticRegression, RandomForestClassifier, GradientBoostingClassifier")
+print("Ratings are modeled as classes (Low/Medium/High); no R² is used anywhere.")
+def _rotate(ax):
+    for t in ax.get_xticklabels():
+        t.set_rotation(30); t.set_ha("right")
+if rating_results is not None and not rating_results.empty:
+    plt.figure(figsize=(7,5))
+    plt.bar(rating_results["Model"], rating_results["Accuracy"], color="cornflowerblue")
+    plt.title("rating_class: Accuracy by Model")
+    plt.ylabel("Accuracy"); _rotate(plt.gca()); plt.tight_layout(); plt.show()
+if health_results is not None and not health_results.empty:
+    plt.figure(figsize=(7,5))
+    plt.bar(health_results["Model"], health_results["F1"], color="mediumseagreen")
+    plt.title("is_healthy: F1-Score by Model")
+    plt.ylabel("F1"); _rotate(plt.gca()); plt.tight_layout(); plt.show()
+figs_made = 0
+if "rating_class" in df.columns:
+    vc = df["rating_class"].dropna().value_counts()
+    if not vc.empty:
+        plt.figure(figsize=(5,4))
+        plt.bar(vc.index.astype(str), vc.values, color="goldenrod")
+        plt.title("Distribution: rating_class"); plt.xlabel("Class"); plt.ylabel("Count")
+        plt.tight_layout(); plt.show(); figs_made += 1
+if "is_healthy" in df.columns:
+    vc = df["is_healthy"].dropna().value_counts().sort_index()
+    if not vc.empty and figs_made == 0:  # ensure at least one class dist if rating_class missing
+        plt.figure(figsize=(5,4))
+        plt.bar(vc.index.astype(str), vc.values, color="orchid")
+        plt.title("Distribution: is_healthy"); plt.xlabel("Class"); plt.ylabel("Count")
+        plt.tight_layout(); plt.show()
+if {"calories","protein_g"} <= set(df.columns):
+    cols = ["calories","protein_g"]
+    color_by = "is_healthy" if "is_healthy" in df.columns and df["is_healthy"].dropna().nunique()>=2 else ("rating_class" if "rating_class" in df.columns else None)
+    use_cols = cols + ([color_by] if color_by else [])
+    plot_df = df[use_cols].dropna()
+    if not plot_df.empty:
+        plt.figure(figsize=(6,5))
+        if color_by:
+            cats = plot_df[color_by].astype(str).unique()
+            for c in cats:
+                mask = plot_df[color_by].astype(str) == c
+                plt.scatter(plot_df.loc[mask,"calories"], plot_df.loc[mask,"protein_g"], alpha=0.6, label=str(c))
+            plt.legend(title=color_by)
+        else:
+            plt.scatter(plot_df["calories"], plot_df["protein_g"], alpha=0.6)
+        plt.title("Calories vs Protein"); plt.xlabel("Calories"); plt.ylabel("Protein (g)")
+        plt.tight_layout(); plt.show()
+def _feature_names_from_pipe(pipe):
+    prep = pipe.named_steps["prep"]
+    num_names = [c for c in feature_cols if c not in cat_cols]
+    try:
+        ohe_fitted = prep.named_transformers_["cat"].named_steps["ohe"]
+        if hasattr(ohe_fitted, "get_feature_names_out"):
+            cat_names = list(ohe_fitted.get_feature_names_out(cat_cols))
+        else:
+            cat_names = list(ohe_fitted.get_feature_names(cat_cols))
+        return cat_names + num_names
+    except:
+        return num_names
+
+def _best_tree_pipe(results, fitted):
+    if results is None or fitted is None: return None
+    order = results.sort_values(["F1","Accuracy"], ascending=False)["Model"].tolist()
+    for name in order:
+        p = fitted[name][0]
+        if isinstance(p.named_steps["model"], (RandomForestClassifier, GradientBoostingClassifier)):
+            return name, p, fitted[name][1][0]  # name, pipe, Xte
+    return None
+
+chosen = _best_tree_pipe(rating_results, rating_fitted)
+if chosen is None:
+    chosen = _best_tree_pipe(health_results, health_fitted)
+
+if chosen:
+    name, pipe, Xte = chosen
+    model = pipe.named_steps["model"]
+    if hasattr(model, "feature_importances_"):
+        names = _feature_names_from_pipe(pipe)
+        importances = model.feature_importances_
+        idx = np.argsort(importances)[-12:]
+        plt.figure(figsize=(8,6))
+        plt.barh(np.array(names)[idx], importances[idx])
+        plt.title(f"Top Feature Importances — {name}")
+        plt.tight_layout(); plt.show()
 
 
