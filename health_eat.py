@@ -1,5 +1,4 @@
 
-
 from google.colab import files
 uploaded = files.upload()
 CSV_PATH = list(uploaded.keys())[0]
